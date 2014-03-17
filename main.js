@@ -1,3 +1,7 @@
+// ------------------------------------
+// Config
+// ------------------------------------
+
 var DEBUG = false;
 var SPEED = 80;
 var GRAVITY = 30;
@@ -6,6 +10,10 @@ var SPAWN_RATE = 1;
 var OPENING = 134;
 var fingersMap = [10, 50, 90, 30, 40, 10, 60, 50, 90, 20];
 var LOGS = 'APP::';
+
+// ------------------------------------
+// Vars
+// ------------------------------------
 
 var gameState,
 	score,
@@ -26,10 +34,9 @@ var gameState,
 
 playerName = window.intel ? intel.xdk.device.model : ' ';
 
-var STATE_READY = 0;
-var STATE_PLAYING = 1;
-var STATE_OVER = 2;
-var STATE_OVER_WIN = 3;
+// ------------------------------------
+// Phaser setup
+// ------------------------------------
 
 callbacks = {
 	preload: preload,
@@ -174,6 +181,95 @@ function create() {
 	reset();
 }
 
+function update() {
+	switch (gameState) {
+		case STATE_READY:
+			// Float in the air
+			birdie.y = (game.world.height / 2) + 8 * Math.cos(game.time.now / 200);
+
+			// Shake instructions text
+			instText.scale.setTo(
+				2 + 0.1 * Math.sin(game.time.now / 100),
+				2 + 0.1 * Math.cos(game.time.now / 100)
+			);
+			break;
+
+		case STATE_PLAYING:
+			// Check game over
+			if (birdie.body.bottom >= game.world.bounds.bottom) {
+				setGameOver();
+				break;
+			}
+			game.physics.overlap(birdie, fingers, setGameOver);
+
+			// Add score
+			game.physics.overlap(birdie, invs, addScore);
+			break;
+
+		case STATE_OVER:
+		case STATE_OVER_WIN:
+			// Shake game over text
+			gameOverText.angle = Math.random() * 5 * Math.cos(game.time.now / 100);
+
+			// Shake score text
+			scoreText.scale.setTo(
+				2 + 0.1 * Math.cos(game.time.now / 100),
+				2 + 0.1 * Math.sin(game.time.now / 100)
+			);
+			break;
+	}
+
+	birds.forEachAlive(function(bird){
+		if (bird.nameText) {
+			bird.nameText.x = bird.x;
+			bird.nameText.y = bird.y - 40;
+		}
+
+		// be sure to stop motion of clones on the floor
+		if (bird != birdie && bird.body.bottom >= game.world.bounds.bottom) {
+			birdie.body.velocity.x = 0;
+		}
+
+		// Angles
+		if (bird == birdie && (gameState == STATE_READY || gameState == STATE_OVER_WIN)) return; // keep horizontal
+		if (bird != birdie && (bird.gameState == STATE_READY || bird.gameState == STATE_OVER_WIN)) return; // keep horizontal
+		var dvy = FLAP + bird.body.velocity.y;
+		bird.angle = (90 * dvy / FLAP) - 180;
+		if (bird.angle < -30) {
+			bird.angle = -30;
+		}
+		if (bird.body.velocity.y == 0 || bird.angle > 90 || bird.angle < -90) {
+			bird.angle = 90;
+			bird.animations.stop();
+			bird.frame = 3;
+		} else {
+			bird.animations.play('fly');
+		}
+	});
+}
+
+function render() {
+	if (DEBUG) {
+		game.debug.renderCameraInfo(game.camera, 40, 40);
+		game.debug.renderSpriteBody(birdie);
+		fingers.forEachAlive(function(finger) {
+			game.debug.renderSpriteBody(finger);
+		});
+		invs.forEach(function(inv) {
+			game.debug.renderSpriteBody(inv);
+		});
+	}
+}
+
+// ------------------------------------
+// FSM
+// ------------------------------------
+
+var STATE_READY = 0;
+var STATE_PLAYING = 1;
+var STATE_OVER = 2;
+var STATE_OVER_WIN = 3;
+
 function reset() {
 	console.log(LOGS, 'reset event');
 	score = 0;
@@ -196,16 +292,6 @@ function reset() {
 	gameState = STATE_READY;
 }
 
-function askPlayerName() {
-	while (!playerName) {
-		playerName = prompt('Player name (6 chars max):');
-		playerName = playerName.replace(/^\s+|\s+$/g, '');
-		playerName = playerName.substr(0, 6);
-	};
-
-	setTimeout(start, 100);
-}
-
 function start() {
 	/*if (!playerName) {
 		askPlayerName();
@@ -225,6 +311,52 @@ function start() {
 
 	// START!
 	gameState = STATE_PLAYING;
+}
+
+function setGameOver(win) {
+	console.log(LOGS, 'over event');
+	gameState = STATE_OVER;
+	if (window.intel) luckySnd.stop();
+
+	if (win === true) {
+		gameState = STATE_OVER_WIN;
+		instText.setText("GAGNANT !!");
+		winSnd.play();
+		birdie.body.allowGravity = false;
+		birdie.body.velocity.x = SPEED/3;
+		birdie.body.velocity.y = 0;
+		birdie.angle = 0;
+		birdie.body.y = game.world.height/2;
+		birdie.animations.play('fly');
+	} else {
+		instText.setText("ESSAIE ENCORE");
+		hurtSnd.play();
+		birdie.body.velocity.x = 0;
+	}
+
+	instText.renderable = true;
+	var hiscore = window.localStorage.getItem('hiscore');
+	hiscore = hiscore ? hiscore : score;
+	hiscore = score > parseInt(hiscore, 10) ? score : hiscore;
+	window.localStorage.setItem('hiscore', hiscore);
+	gameOverText.setText("GAMEOVER\n\nMEILLEUR SCORE\n" + hiscore);
+	gameOverText.renderable = true;
+
+	sendModel();
+}
+
+// ------------------------------------
+// Utils
+// ------------------------------------
+
+function askPlayerName() {
+	while (!playerName) {
+		playerName = prompt('Player name (6 chars max):');
+		playerName = playerName.replace(/^\s+|\s+$/g, '');
+		playerName = playerName.substr(0, 6);
+	};
+
+	setTimeout(start, 100);
 }
 
 function flap() {
@@ -289,118 +421,6 @@ function addScore(_, inv) {
 	}
 }
 
-function setGameOver(win) {
-	console.log(LOGS, 'over event');
-	gameState = STATE_OVER;
-	if (window.intel) luckySnd.stop();
-
-	if (win === true) {
-		gameState = STATE_OVER_WIN;
-		instText.setText("GAGNANT !!");
-		winSnd.play();
-		birdie.body.allowGravity = false;
-		birdie.body.velocity.x = SPEED/3;
-		birdie.body.velocity.y = 0;
-		birdie.angle = 0;
-		birdie.body.y = game.world.height/2;
-		birdie.animations.play('fly');
-	} else {
-		instText.setText("ESSAIE ENCORE");
-		hurtSnd.play();
-		birdie.body.velocity.x = 0;
-	}
-
-	instText.renderable = true;
-	var hiscore = window.localStorage.getItem('hiscore');
-	hiscore = hiscore ? hiscore : score;
-	hiscore = score > parseInt(hiscore, 10) ? score : hiscore;
-	window.localStorage.setItem('hiscore', hiscore);
-	gameOverText.setText("GAMEOVER\n\nMEILLEUR SCORE\n" + hiscore);
-	gameOverText.renderable = true;
-
-	sendModel();
-}
-
-function update() {
-	switch (gameState) {
-		case STATE_READY:
-			// Float in the air
-			birdie.y = (game.world.height / 2) + 8 * Math.cos(game.time.now / 200);
-
-			// Shake instructions text
-			instText.scale.setTo(
-				2 + 0.1 * Math.sin(game.time.now / 100),
-				2 + 0.1 * Math.cos(game.time.now / 100)
-			);
-			break;
-
-		case STATE_PLAYING:
-			// Check game over
-			if (birdie.body.bottom >= game.world.bounds.bottom) {
-				setGameOver();
-				break;
-			}
-			game.physics.overlap(birdie, fingers, setGameOver);
-
-			// Add score
-			game.physics.overlap(birdie, invs, addScore);
-			break;
-
-		case STATE_OVER:
-		case STATE_OVER_WIN:
-			// Shake game over text
-			gameOverText.angle = Math.random() * 5 * Math.cos(game.time.now / 100);
-
-			// Shake score text
-			scoreText.scale.setTo(
-				2 + 0.1 * Math.cos(game.time.now / 100),
-				2 + 0.1 * Math.sin(game.time.now / 100)
-			);
-			break;
-	}
-
-	birds.forEachAlive(function(bird){
-		if (bird.nameText) {
-			bird.nameText.x = bird.x;
-			bird.nameText.y = bird.y - 40;
-		}
-
-		// Angles
-		if (bird == birdie && (gameState == STATE_READY || gameState == STATE_OVER_WIN)) return; // keep horizontal
-		if (bird != birdie && (bird.gameState == STATE_READY || bird.gameState == STATE_OVER_WIN)) return; // keep horizontal
-		var dvy = FLAP + bird.body.velocity.y;
-		bird.angle = (90 * dvy / FLAP) - 180;
-		if (bird.angle < -30) {
-			bird.angle = -30;
-		}
-		if (bird.body.velocity.y == 0 || bird.angle > 90 || bird.angle < -90) {
-			bird.angle = 90;
-			bird.animations.stop();
-			bird.frame = 3;
-		} else {
-			bird.animations.play('fly');
-		}
-
-		// be sure to stop motion of clones
-		if (bird != birdie && birdie.body.bottom >= game.world.bounds.bottom) {
-			birdie.body.velocity.x = 0;
-		}
-	});
-}
-
-function render() {
-	if (DEBUG) {
-		game.debug.renderCameraInfo(game.camera, 40, 40);
-		game.debug.renderSpriteBody(birdie);
-		fingers.forEachAlive(function(finger) {
-			game.debug.renderSpriteBody(finger);
-		});
-		invs.forEach(function(inv) {
-			game.debug.renderSpriteBody(inv);
-		});
-	}
-}
-
 function sendModel() {
 	var data = saveModel(birdie);
 	socket.emit('position', data);
@@ -418,6 +438,10 @@ socket.on('position', function (data) {
 		console.log(LOGS, 'new clone position:', data);
 	}
 	applyModel(clones[data.sender], data);
+
+	if (data.clones && gameState == STATE_READY) {
+		scoreText.setText("PRET\nA\nS'ENVOLER\n("+data.clones+")");
+	}
 });
 
 function saveModel(bird) {
