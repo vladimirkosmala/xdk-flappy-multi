@@ -46,7 +46,7 @@ callbacks = {
 };
 
 function main() {
-	parent = document.querySelector('#screen');
+	var parent = document.querySelector('#screen');
 
 	screenWidth = window.innerWidth;
 	screenHeight = window.innerHeight > 500 ? 500 : window.innerHeight;
